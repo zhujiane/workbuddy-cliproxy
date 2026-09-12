@@ -60,6 +60,7 @@ import "C"
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,7 +77,6 @@ import (
 
 const (
 	providerName  = "workbuddy"
-	authFileName  = "workbuddy.json"
 	upstreamBase  = "https://copilot.tencent.com"
 	clientUA      = "CLI/2.63.2 CodeBuddy/2.63.2"
 	originReferer = "https://www.codebuddy.cn"
@@ -327,6 +327,7 @@ func wbModels() []pluginapi.ModelInfo {
 		{"hy3-preview-agent", "Hy3 Preview Agent", 262144},
 		{"deepseek-v4-pro", "DeepSeek V4 Pro", 1000000},
 		{"deepseek-v4-flash", "DeepSeek V4 Flash", 1000000},
+		{"deepseek-v4.1-flash", "DeepSeek V4.1 Flash", 1000000},
 	}
 	models := make([]pluginapi.ModelInfo, 0, len(specs))
 	for _, m := range specs {
@@ -351,8 +352,9 @@ func wbModels() []pluginapi.ModelInfo {
 
 // storedAuth is the on-disk shape of a workbuddy credential.
 type storedAuth struct {
-	Auth    storedTokens  `json:"auth"`
-	Account storedAccount `json:"account"`
+	CredentialID string        `json:"credentialId,omitempty"`
+	Auth         storedTokens  `json:"auth"`
+	Account      storedAccount `json:"account"`
 }
 
 type storedTokens struct {
@@ -523,19 +525,34 @@ func handleParseAuth(raw []byte) ([]byte, error) {
 		// Not a workbuddy credential; let the host try other providers.
 		return okEnvelope(pluginapi.AuthParseResponse{Handled: false})
 	}
+	auth := toAuthData(sa)
+	// Keep existing files (including legacy workbuddy.json) in place.
+	if req.FileName != "" {
+		auth.ID = req.FileName
+		auth.FileName = req.FileName
+	}
 	return okEnvelope(pluginapi.AuthParseResponse{
 		Handled: true,
-		Auth:    toAuthData(sa),
+		Auth:    auth,
 	})
 }
 
 func toAuthData(sa *storedAuth) pluginapi.AuthData {
+	if sa.CredentialID == "" {
+		identity, _ := json.Marshal([]string{sa.Account.UID, sa.Account.EnterpriseID})
+		if sa.Account.UID == "" {
+			// Persist the fallback before tokens rotate when account lookup fails.
+			identity = []byte(firstNonEmpty(sa.Auth.RefreshToken, sa.Auth.AccessToken))
+		}
+		sa.CredentialID = fmt.Sprintf("%x", sha256.Sum256(identity))
+	}
+	fileName := fmt.Sprintf("workbuddy-%x.json", sha256.Sum256([]byte(sa.CredentialID)))
 	storage, _ := json.Marshal(sa)
 	return pluginapi.AuthData{
 		Provider:    providerName,
-		ID:          providerName,
-		FileName:    authFileName,
-		Label:       "WorkBuddy",
+		ID:          fileName,
+		FileName:    fileName,
+		Label:       "WorkBuddy " + firstNonEmpty(sa.Account.Nickname, sa.Account.UID, fileName[10:22]),
 		StorageJSON: storage,
 		Metadata:    map[string]any{"type": providerName},
 	}
@@ -639,6 +656,7 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
+	toAuthData(sa) // Stabilize legacy credentials before rotating tokens.
 	headers := func(r *http.Request) {
 		commonHeaders(r)
 		r.Header.Set("X-Refresh-Token", sa.Auth.RefreshToken)
@@ -666,7 +684,12 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 		sa.Auth.Domain = tok.Domain
 	}
 	sa.Auth.ExpiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Unix()
-	return okEnvelope(pluginapi.AuthRefreshResponse{Auth: toAuthData(sa)})
+	auth := toAuthData(sa)
+	if req.AuthID != "" {
+		auth.ID = req.AuthID
+		auth.FileName = "" // The host preserves the existing filename.
+	}
+	return okEnvelope(pluginapi.AuthRefreshResponse{Auth: auth})
 }
 
 // -----------------------------------------------------------------------------

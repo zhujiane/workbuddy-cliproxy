@@ -6,11 +6,11 @@
 
 ## 工作原理
 
-在 CPA 里注册为 `workbuddy` provider:负责 CodeBuddy 扫码登录、token 刷新,并把请求转发到 `copilot.tencent.com/v2/chat/completions`。登录后凭据存为 `workbuddy.json`。
+在 CPA 里注册为 `workbuddy` provider:负责 CodeBuddy 扫码登录、token 刷新,并把请求转发到 `copilot.tencent.com/v2/chat/completions`。登录后按账号保存为独立的 `workbuddy-<hash>.json`,支持多个账号共存。旧版 `workbuddy.json` 仍可读取和刷新;旧版已被覆盖的账号需要重新授权。
 
 ## 模型
 
-`glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `deepseek-v4-pro` · `deepseek-v4-flash`
+`glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `deepseek-v4-pro` · `deepseek-v4-flash` · `deepseek-v4.1-flash`
 
 具体可用性以 CodeBuddy 账号权限为准。
 
