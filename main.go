@@ -228,6 +228,10 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
 		return okEnvelope(wbRegistration())
+	case pluginabi.MethodManagementRegister:
+		return okEnvelope(quotaRegistration())
+	case pluginabi.MethodManagementHandle:
+		return handleQuotaManagement(request)
 	case pluginabi.MethodModelStatic, pluginabi.MethodModelForAuth:
 		return okEnvelope(pluginapi.ModelResponse{Provider: providerName, Models: wbModels()})
 	case pluginabi.MethodAuthIdentifier:
@@ -277,6 +281,7 @@ type registration struct {
 }
 
 type registrationCapability struct {
+	ManagementAPI         bool                         `json:"management_api"`
 	ModelProvider         bool                         `json:"model_provider"`
 	AuthProvider          bool                         `json:"auth_provider"`
 	Executor              bool                         `json:"executor"`
@@ -300,6 +305,7 @@ func wbRegistration() registration {
 			GitHubRepository: "https://github.com/lovingfish/workbuddy-cliproxy",
 		},
 		Capabilities: registrationCapability{
+			ManagementAPI:         true,
 			ModelProvider:         true,
 			AuthProvider:          true,
 			Executor:              true,
@@ -368,6 +374,7 @@ type storedAccount struct {
 	UID          string `json:"uid"`
 	EnterpriseID string `json:"enterpriseId"`
 	Nickname     string `json:"nickname"`
+	Email        string `json:"email,omitempty"`
 }
 
 // apiEnvelope is the generic {code,msg,data} wrapper used by every CodeBuddy API.
@@ -389,6 +396,7 @@ type accountData struct {
 	UID          string `json:"uid"`
 	EnterpriseID string `json:"enterpriseId"`
 	Nickname     string `json:"nickname"`
+	Email        string `json:"email,omitempty"`
 }
 
 type authStateData struct {
@@ -552,9 +560,9 @@ func toAuthData(sa *storedAuth) pluginapi.AuthData {
 		Provider:    providerName,
 		ID:          fileName,
 		FileName:    fileName,
-		Label:       "WorkBuddy " + firstNonEmpty(sa.Account.Nickname, sa.Account.UID, fileName[10:22]),
+		Label:       "WorkBuddy " + firstNonEmpty(sa.Account.Nickname, sa.Account.Email, sa.Account.UID, fileName[10:22]),
 		StorageJSON: storage,
-		Metadata:    map[string]any{"type": providerName},
+		Metadata:    accountMetadata(sa),
 	}
 }
 
@@ -623,8 +631,10 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		commonHeaders(r)
 		r.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	}
-	if acctRaw, _, errAcct := doJSON(lc.client, http.MethodGet, endpointLoginAcct+state, acctHeaders, nil); errAcct == nil {
-		_ = json.Unmarshal(acctRaw, &acct)
+	acctRaw, _, errAcct := doJSON(lc.client, http.MethodGet, endpointLoginAcct+state, acctHeaders, nil)
+	if errAcct != nil || json.Unmarshal(acctRaw, &acct) != nil || strings.TrimSpace(acct.UID) == "" {
+		// Keep the login state so the host can retry instead of saving an anonymous credential.
+		return okEnvelope(pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending, Message: "登录已授权，正在获取账号信息，请稍后重试"})
 	}
 
 	sa := &storedAuth{
@@ -638,6 +648,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 			UID:          acct.UID,
 			EnterpriseID: acct.EnterpriseID,
 			Nickname:     acct.Nickname,
+			Email:        acct.Email,
 		},
 	}
 	loginStates.Delete(state)

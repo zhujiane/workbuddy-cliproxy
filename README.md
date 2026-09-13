@@ -85,3 +85,22 @@ hy3 系列(`hy3` / `hy3-preview` / `hy3-preview-agent`)自动开最大思考:wor
 ## License
 
 MIT。
+
+## 配额与账号信息
+
+更新插件并重启 CPA 后，从侧边栏 **WorkBuddy 配额** 打开页面；也可以访问
+`/v0/resource/plugins/workbuddy/panel`。输入 CPA **管理密钥**，点击「查询 / 刷新」，
+按账号查看昵称、UID、邮箱（上游提供时）、企业 ID，以及剩余 / 已用积分、资源包和周期结束时间。
+密钥只在当前页面内存中使用，不写入浏览器存储。
+
+管理接口：`GET /v0/management/plugins/workbuddy/credits`，使用
+`Authorization: Bearer <管理密钥>`。可添加 `?auth_index=<账号索引>` 查询单个账号。
+返回 `accounts` 数组；查询失败的账号返回 `error`，不会伪装成零余额。
+
+积分统计来自 CodeBuddy **个人资源包**计费接口，优先使用当前周期数据，分页汇总有效和已耗尽资源包。
+不代表企业共享配额，也不代表所有模型分别可用的额度；计费数据可能延迟。
+接口协议参考 [Sliverkiss/cpa-plugin 的计费实现](https://github.com/Sliverkiss/cpa-plugin/blob/main/workbuddy/billing.go)。
+
+账号资料会映射到 CPA 凭据的标签和备注。旧凭据已有的昵称会在重新加载时显示；
+如果旧文件在登录时未成功保存账号资料，需要重新扫码授权补齐。
+新登录会等待账号信息读取成功后再保存，避免生成只有随机 ID 的凭据。
