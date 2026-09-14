@@ -5,8 +5,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -66,6 +68,32 @@ func summarizePackage(p resourcePackage) quotaPackage {
 	return quotaPackage{p.PackageName, remain, used, size, p.CycleStartTime, p.CycleEndTime}
 }
 
+// Retry read-only billing queries once after a transient network failure.
+func doBillingRequest(client *http.Client, req *http.Request) (*http.Response, error) {
+	resp, err := client.Do(req)
+	if err == nil || req.Context().Err() != nil || req.GetBody == nil {
+		return resp, err
+	}
+	retry := req.Clone(req.Context())
+	retry.Body, _ = req.GetBody()
+	return client.Do(retry)
+}
+
+func billingRequestError(err error) error {
+	var dns *net.DNSError
+	var network net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Errorf("billing request timed out; please retry")
+	case errors.As(err, &dns):
+		return fmt.Errorf("billing DNS lookup failed; please retry")
+	case errors.As(err, &network) && network.Timeout():
+		return fmt.Errorf("billing network timeout; please retry")
+	default:
+		return fmt.Errorf("billing connection failed; please retry")
+	}
+}
+
 // Query personal resource packages. This endpoint does not establish enterprise pooled quota.
 func fetchQuota(sa *storedAuth) (*quotaSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -94,9 +122,9 @@ func fetchQuota(sa *storedAuth) (*quotaSummary, error) {
 		if sa.Auth.Domain != "" {
 			req.Header.Set("X-Domain", sa.Auth.Domain)
 		}
-		resp, err := client.Do(req)
+		resp, err := doBillingRequest(client, req)
 		if err != nil {
-			return nil, fmt.Errorf("billing request failed")
+			return nil, billingRequestError(err)
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024+1))
 		resp.Body.Close()

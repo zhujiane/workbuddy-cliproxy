@@ -148,3 +148,24 @@ func TestLoginWaitsForAccountAndPreservesProfile(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingRetriesNetworkFailureWithBody(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != "payload" {
+			t.Fatalf("retry lost request body: %q", body)
+		}
+		if calls == 1 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+	})}
+	req, _ := http.NewRequest(http.MethodPost, "https://example.test/billing", strings.NewReader("payload"))
+	resp, err := doBillingRequest(client, req)
+	if err != nil || calls != 2 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	resp.Body.Close()
+}
