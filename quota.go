@@ -154,7 +154,7 @@ func quotaRegistration() any {
 		Resources []pluginapi.ResourceRoute   `json:"resources"`
 	}{
 		Routes:    []pluginapi.ManagementRoute{{Method: http.MethodGet, Path: "/plugins/workbuddy/credits", Description: "Query WorkBuddy resource credits"}},
-		Resources: []pluginapi.ResourceRoute{{Path: "/panel", Description: "查看账号积分和资源包"}},
+		Resources: []pluginapi.ResourceRoute{{Path: "/panel", Menu: "Workbuddy 配额", Description: "查看 Workbuddy-cn 和 Workbuddy 账号积分和资源包"}},
 	}
 }
 
