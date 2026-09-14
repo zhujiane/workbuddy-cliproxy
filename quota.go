@@ -76,11 +76,13 @@ func fetchQuota(sa *storedAuth) (*quotaSummary, error) {
 	sum := &quotaSummary{Packages: []quotaPackage{}, Scope: "personal_resource_packages"}
 	for page := 1; page <= 100; page++ {
 		payload, _ := json.Marshal(map[string]any{"PageNumber": page, "PageSize": 100, "ProductCode": "p_tcaca", "Status": []int{0, 3}, "PackageEndTimeRangeBegin": now.Format("2006-01-02 15:04:05"), "PackageEndTimeRangeEnd": now.AddDate(101, 0, 0).Format("2006-01-02 15:04:05")})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://www.codebuddy.cn/v2/billing/meter/get-user-resource", bytes.NewReader(payload))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, accountOrigin(sa)+"/v2/billing/meter/get-user-resource", bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
 		commonHeaders(req)
+		req.Header.Set("Origin", accountOrigin(sa))
+		req.Header.Set("Referer", accountOrigin(sa)+"/")
 		req.Header.Set("Authorization", "Bearer "+sa.Auth.AccessToken)
 		if sa.Account.UID != "" {
 			req.Header.Set("X-User-Id", sa.Account.UID)
@@ -144,6 +146,9 @@ func fetchQuota(sa *storedAuth) (*quotaSummary, error) {
 }
 
 func quotaRegistration() any {
+	if providerName == "workbuddy-cn" {
+		return struct{}{}
+	}
 	return struct {
 		Routes    []pluginapi.ManagementRoute `json:"routes"`
 		Resources []pluginapi.ResourceRoute   `json:"resources"`
@@ -154,6 +159,7 @@ func quotaRegistration() any {
 }
 
 type quotaAccount struct {
+	Provider     string        `json:"provider"`
 	Nickname     string        `json:"nickname,omitempty"`
 	UID          string        `json:"uid,omitempty"`
 	Email        string        `json:"email,omitempty"`
@@ -214,7 +220,7 @@ func handleQuotaManagementWithHost(raw []byte, call func(string, []byte) ([]byte
 	accounts := []quotaAccount{}
 	index := strings.TrimSpace(req.Query.Get("auth_index"))
 	for _, f := range listing.Files {
-		if firstNonEmpty(f.Provider, f.Type) != providerName || (index != "" && index != f.AuthIndex) {
+		if (firstNonEmpty(f.Provider, f.Type) != "workbuddy" && firstNonEmpty(f.Provider, f.Type) != "workbuddy-cn") || (index != "" && index != f.AuthIndex) {
 			continue
 		}
 		a := quotaAccount{AuthIndex: f.AuthIndex, Name: firstNonEmpty(f.Label, f.Name), Disabled: f.Disabled}
@@ -228,6 +234,7 @@ func handleQuotaManagementWithHost(raw []byte, call func(string, []byte) ([]byte
 			if err != nil {
 				err = fmt.Errorf("invalid stored credential")
 			} else {
+				a.Provider = storedProvider(sa)
 				a.Nickname, a.UID, a.Email, a.EnterpriseID = sa.Account.Nickname, sa.Account.UID, sa.Account.Email, sa.Account.EnterpriseID
 				a.Name = firstNonEmpty(a.Nickname, a.Email, a.Name, a.UID)
 				a.Credits, err = fetchQuota(sa)

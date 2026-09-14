@@ -42,7 +42,7 @@ jobs:
           version="0.0.0+$(git rev-parse --short HEAD)"
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
             go build -buildmode=c-shared \
-            -ldflags "-s -w -X main.pluginVersion=${version}" \
+            -ldflags "-s -w -X main.providerName=workbuddy -X main.pluginVersion=${version}" \
             -o workbuddy.so .
           rm -f workbuddy.h
           python3 -c "import zipfile; z=zipfile.ZipFile('workbuddy_${version}_linux_amd64.zip','w',zipfile.ZIP_DEFLATED); z.write('workbuddy.so','workbuddy.so')"

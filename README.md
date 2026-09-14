@@ -1,5 +1,16 @@
 # workbuddy-cliproxy
 
+## 国内 / 国际双入口（0.2.0）
+
+- `workbuddy-cn.so`：国内站 OAuth、认证文件与请求转发。
+- `workbuddy.so`：国际站 OAuth、认证文件与请求转发。
+- 分别构建：`make build PLUGIN_ID=workbuddy-cn VERSION=0.2.0` 和 `make build PLUGIN_ID=workbuddy VERSION=0.2.0`。将两个文件安装到 CPA 插件目录，并启用两个同名配置项。
+- 旧凭据没有 `workbuddy_provider` 字段时按国内站处理；`auth.domain` 包含 `codebuddy.ai` 时按国际站处理。新凭据保存明确的版本标识。已有文件名保持不变。
+- 统一配额页由 `workbuddy` 国际插件提供，同时展示两类账号，支持筛选、中英文、深色模式、手动刷新和每 60 秒自动刷新。
+- 页面数据和管理密钥仅存储于当前标签页的 `sessionStorage`，刷新页面会保留；关闭标签页后清除。点击「清除缓存」同时移除密钥与数据。刷新失败保留旧数据并显示错误。
+
+以下历史安装说明中的单插件部署应按上述双入口配置调整。
+
 把**腾讯 CodeBuddy**（`copilot.tencent.com`）封装成 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)(CPA)插件,任何支持 OpenAI / Anthropic 协议的客户端(Claude Code、Cursor、Cline、SDK……)都能直接调用 CodeBuddy 背后的模型。
 
 对 [Sliverkiss/cpa-plugin](https://github.com/Sliverkiss/cpa-plugin) 公开 `workbuddy.so` 的 clean-room 逆向重写,补齐了源码与 x86_64 支持;workbuddy 的原始设计归属 Sliverkiss。
@@ -165,7 +176,7 @@ MIT。
 更新插件并重启 CPA 后，从侧边栏 **WorkBuddy 配额** 打开页面；也可以访问
 `/v0/resource/plugins/workbuddy/panel`。输入 CPA **管理密钥**，点击「查询 / 刷新」，
 按账号查看昵称、UID、邮箱（上游提供时）、企业 ID，以及剩余 / 已用积分、资源包和周期结束时间。
-密钥只在当前页面内存中使用，不写入浏览器存储。
+密钥仅保存在当前标签页会话存储中，不写入持久化 localStorage。
 
 管理接口：`GET /v0/management/plugins/workbuddy/credits`，使用
 `Authorization: Bearer <管理密钥>`。可添加 `?auth_index=<账号索引>` 查询单个账号。

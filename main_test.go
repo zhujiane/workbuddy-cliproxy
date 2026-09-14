@@ -105,3 +105,36 @@ func TestDeepSeekV41FlashRegistered(t *testing.T) {
 	}
 	t.Fatal("DeepSeek V4.1 Flash missing")
 }
+
+func TestEditionIsolation(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{`{"provider":"workbuddy","auth":{"accessToken":"old"}}`, "workbuddy-cn"},
+		{`{"auth":{"accessToken":"intl","domain":"www.codebuddy.ai"}}`, "workbuddy"},
+		{`{"workbuddy_provider":"workbuddy","auth":{"accessToken":"intl"}}`, "workbuddy"},
+	} {
+		sa, err := parseStored([]byte(tc.raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if storedProvider(sa) != tc.want {
+			t.Fatalf("edition = %s, want %s", storedProvider(sa), tc.want)
+		}
+		request, _ := json.Marshal(pluginapi.AuthParseRequest{RawJSON: []byte(tc.raw)})
+		raw, err := handleParseAuth(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var env envelope
+		json.Unmarshal(raw, &env)
+		var response pluginapi.AuthParseResponse
+		json.Unmarshal(env.Result, &response)
+		if response.Handled != (tc.want == providerName) {
+			t.Fatal("wrong plugin claimed credential")
+		}
+	}
+	cn := toAuthData(&storedAuth{Provider: "workbuddy-cn", Account: storedAccount{UID: "same"}})
+	intl := toAuthData(&storedAuth{Provider: "workbuddy", Account: storedAccount{UID: "same"}})
+	if cn.ID == intl.ID || cn.Provider == intl.Provider {
+		t.Fatal("cross-region identity collision")
+	}
+}

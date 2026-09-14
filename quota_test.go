@@ -98,7 +98,7 @@ func TestQuotaManagementFiltersAccountsAndHidesCredentials(t *testing.T) {
 func TestAccountDisplayMetadata(t *testing.T) {
 	sa := &storedAuth{Auth: storedTokens{AccessToken: "secret"}, Account: storedAccount{UID: "123", Nickname: "昵称", Email: "user@example.com", EnterpriseID: "org"}}
 	auth := toAuthData(sa)
-	if auth.Label != "WorkBuddy 昵称" || auth.Metadata["email"] != "user@example.com" || !strings.Contains(auth.Metadata["note"].(string), "昵称") {
+	if auth.Label != "workbuddy-cn 昵称" || auth.Metadata["email"] != "user@example.com" || !strings.Contains(auth.Metadata["note"].(string), "昵称") {
 		t.Fatalf("missing account display: %+v", auth.Metadata)
 	}
 	delete(auth.Metadata, "email")
@@ -138,7 +138,7 @@ func TestLoginWaitsForAccountAndPreservesProfile(t *testing.T) {
 				t.Fatal("saved incomplete account")
 			}
 		} else {
-			if response.Status != pluginapi.AuthLoginStatusSuccess || response.Auth.Label != "WorkBuddy Alice" {
+			if response.Status != pluginapi.AuthLoginStatusSuccess || response.Auth.Label != providerName+" Alice" {
 				t.Fatal("missing login profile")
 			}
 			saved, err := parseStored(response.Auth.StorageJSON)

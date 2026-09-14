@@ -80,18 +80,23 @@ import (
 //	go build -ldflags "-X main.pluginVersion=0.1.0"
 var pluginVersion = "0.1.0"
 
-const (
-	providerName     = "workbuddy"
-	pluginRepository = "https://github.com/zhujiane/workbuddy-cliproxy"
-	upstreamBase     = "https://copilot.tencent.com"
-	clientUA      = "CLI/2.63.2 CodeBuddy/2.63.2"
-	originReferer = "https://www.codebuddy.cn"
+var providerName = "workbuddy-cn"
 
-	endpointAuthState    = upstreamBase + "/v2/plugin/auth/state?platform=CLI"
-	endpointLoginAcct    = upstreamBase + "/v2/plugin/login/account?state="
-	endpointAuthToken    = upstreamBase + "/v2/plugin/auth/token?state="
-	endpointTokenRefresh = upstreamBase + "/v2/plugin/auth/token/refresh"
-	endpointChat         = upstreamBase + "/v2/chat/completions"
+var (
+	upstreamBase  = "https://copilot.tencent.com"
+	originReferer = "https://www.codebuddy.cn"
+)
+
+func init() {
+	if providerName == "workbuddy" {
+		upstreamBase = "https://www.codebuddy.ai"
+		originReferer = upstreamBase
+	}
+}
+
+const (
+	pluginRepository = "https://github.com/zhujiane/workbuddy-cliproxy"
+	clientUA         = "CLI/2.63.2 CodeBuddy/2.63.2"
 
 	loginTTL = 5 * time.Minute
 )
@@ -364,6 +369,7 @@ func wbModels() []pluginapi.ModelInfo {
 
 // storedAuth is the on-disk shape of a workbuddy credential.
 type storedAuth struct {
+	Provider     string        `json:"workbuddy_provider,omitempty"`
 	CredentialID string        `json:"credentialId,omitempty"`
 	Auth         storedTokens  `json:"auth"`
 	Account      storedAccount `json:"account"`
@@ -535,7 +541,7 @@ func handleParseAuth(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	sa, err := parseStored(req.RawJSON)
-	if err != nil {
+	if err != nil || storedProvider(sa) != providerName {
 		// Not a workbuddy credential; let the host try other providers.
 		return okEnvelope(pluginapi.AuthParseResponse{Handled: false})
 	}
@@ -560,13 +566,14 @@ func toAuthData(sa *storedAuth) pluginapi.AuthData {
 		}
 		sa.CredentialID = fmt.Sprintf("%x", sha256.Sum256(identity))
 	}
-	fileName := fmt.Sprintf("workbuddy-%x.json", sha256.Sum256([]byte(sa.CredentialID)))
+	sa.Provider = storedProvider(sa)
+	fileName := fmt.Sprintf(sa.Provider+"-%x.json", sha256.Sum256([]byte(sa.CredentialID)))
 	storage, _ := json.Marshal(sa)
 	return pluginapi.AuthData{
-		Provider:    providerName,
+		Provider:    sa.Provider,
 		ID:          fileName,
 		FileName:    fileName,
-		Label:       "WorkBuddy " + firstNonEmpty(sa.Account.Nickname, sa.Account.Email, sa.Account.UID, fileName[10:22]),
+		Label:       sa.Provider + " " + firstNonEmpty(sa.Account.Nickname, sa.Account.Email, sa.Account.UID, fileName[10:22]),
 		StorageJSON: storage,
 		Metadata:    accountMetadata(sa),
 	}
@@ -574,7 +581,7 @@ func toAuthData(sa *storedAuth) pluginapi.AuthData {
 
 func handleStartLogin(raw []byte) ([]byte, error) {
 	client := newLoginClient()
-	data, _, err := doJSON(client, http.MethodPost, endpointAuthState, nil, bytes.NewReader([]byte("{}")))
+	data, _, err := doJSON(client, http.MethodPost, (upstreamBase + "/v2/plugin/auth/state?platform=CLI"), nil, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return nil, fmt.Errorf("auth state failed: %w", err)
 	}
@@ -617,7 +624,7 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 	// token bundle once complete. login/account sits behind the openresty gateway
 	// and is rejected (401) until login finishes, so probe token first and only
 	// fetch account once we hold a bearer.
-	tokRaw, _, errTok := doJSON(lc.client, http.MethodGet, endpointAuthToken+state, nil, nil)
+	tokRaw, _, errTok := doJSON(lc.client, http.MethodGet, (upstreamBase+"/v2/plugin/auth/token?state=")+state, nil, nil)
 	if errTok != nil {
 		return okEnvelope(pluginapi.AuthLoginPollResponse{
 			Status:  pluginapi.AuthLoginStatusPending,
@@ -637,13 +644,14 @@ func handlePollLogin(raw []byte) ([]byte, error) {
 		commonHeaders(r)
 		r.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	}
-	acctRaw, _, errAcct := doJSON(lc.client, http.MethodGet, endpointLoginAcct+state, acctHeaders, nil)
+	acctRaw, _, errAcct := doJSON(lc.client, http.MethodGet, (upstreamBase+"/v2/plugin/login/account?state=")+state, acctHeaders, nil)
 	if errAcct != nil || json.Unmarshal(acctRaw, &acct) != nil || strings.TrimSpace(acct.UID) == "" {
 		// Keep the login state so the host can retry instead of saving an anonymous credential.
 		return okEnvelope(pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending, Message: "登录已授权，正在获取账号信息，请稍后重试"})
 	}
 
 	sa := &storedAuth{
+		Provider: providerName,
 		Auth: storedTokens{
 			AccessToken:  tok.AccessToken,
 			RefreshToken: tok.RefreshToken,
@@ -682,7 +690,7 @@ func handleRefreshAuth(raw []byte) ([]byte, error) {
 		}
 		r.Header.Set("X-Auth-Refresh-Source", providerName)
 	}
-	data, status, err := doJSON(sharedHTTPClient(), http.MethodPost, endpointTokenRefresh, headers, nil)
+	data, status, err := doJSON(sharedHTTPClient(), http.MethodPost, (upstreamBase + "/v2/plugin/auth/token/refresh"), headers, nil)
 	if err != nil {
 		if status >= 400 {
 			return nil, fmt.Errorf("refresh rejected (HTTP %d)", status)
@@ -725,7 +733,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	// CodeBuddy rejects non-stream requests (code 11101), so always stream
 	// upstream and fold the chunks into a single chat.completion object.
 	body := rewriteSystemForUpstream(forceStreamBody(req.Payload, req.OriginalRequest))
-	httpReq, err := http.NewRequest(http.MethodPost, endpointChat, bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -783,7 +791,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 
 	// Async: return immediately with empty chunks. A goroutine pumps the upstream
 	// and emits each chunk via host.stream.emit so the client sees true streaming.
-	httpReq, err := http.NewRequest(http.MethodPost, endpointChat, bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
@@ -844,7 +852,7 @@ func pumpUpstreamStream(httpReq *http.Request, streamID string, sseFramed bool) 
 // collectUpstreamStream is the synchronous fallback (no async stream id): drain
 // the upstream, clean each chunk, return them as a slice.
 func collectUpstreamStream(body []byte, sa *storedAuth, sseFramed bool) ([]pluginapi.ExecutorStreamChunk, error) {
-	httpReq, err := http.NewRequest(http.MethodPost, endpointChat, bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

@@ -116,7 +116,7 @@ jobs:
           fi
           CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" \
             go build -buildmode=c-shared \
-            -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
+            -ldflags "-s -w -X main.providerName=workbuddy -X main.pluginVersion=${VERSION}" \
             -o "workbuddy.${EXT}" .
           rm -f workbuddy.h
           if [[ "${GOOS}" == "darwin" ]]; then

@@ -1,4 +1,4 @@
-PLUGIN_ID ?= workbuddy
+PLUGIN_ID ?= workbuddy-cn
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 VERSION ?= 0.1.0
@@ -13,7 +13,7 @@ EXT := so
 endif
 
 LIB := $(PLUGIN_ID).$(EXT)
-LDFLAGS := -s -w -X main.pluginVersion=$(VERSION)
+LDFLAGS := -s -w -X main.pluginVersion=$(VERSION) -X main.providerName=$(PLUGIN_ID)
 
 .PHONY: test build install clean
 
