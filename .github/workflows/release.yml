@@ -1,0 +1,213 @@
+name: release
+
+# Push a tag like v0.1.0 (or run workflow_dispatch) to build CLIProxyAPI
+# plugin-store archives:
+#   workbuddy_<version>_<goos>_<goarch>.zip   # library at zip root
+#   checksums.txt                             # sha256sum format
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without leading v (used only when not running from a tag)"
+        required: false
+        default: "0.0.0-dev"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: CGO_ENABLED=1 go test ./...
+
+  version:
+    name: resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          if [[ ! "${version}" =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "invalid plugin version: ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "resolved version=${version}"
+
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: [test, version]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: so
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            ext: so
+          - runner: macos-13
+            goos: darwin
+            goarch: amd64
+            ext: dylib
+          - runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: dylib
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: dll
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install MinGW (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install mingw -y --no-progress
+          $candidates = @(
+            'C:\ProgramData\mingw64\mingw64\bin',
+            'C:\mingw64\bin'
+          )
+          foreach ($p in $candidates) {
+            if (Test-Path (Join-Path $p 'gcc.exe')) {
+              Add-Content -Path $env:GITHUB_PATH -Value $p
+              Write-Host "using gcc at $p"
+              break
+            }
+          }
+      - name: Build plugin
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          EXT: ${{ matrix.ext }}
+          LIB_NAME: workbuddy.${{ matrix.ext }}
+          ZIP_NAME: workbuddy_${{ needs.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+        run: |
+          set -euo pipefail
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            command -v gcc >/dev/null
+          fi
+          CGO_ENABLED=1 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+            go build -buildmode=c-shared \
+            -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
+            -o "workbuddy.${EXT}" .
+          rm -f workbuddy.h
+          if [[ "${GOOS}" == "darwin" ]]; then
+            codesign --force --sign - "workbuddy.${EXT}" || true
+          fi
+          py=python3
+          command -v python3 >/dev/null 2>&1 || py=python
+          "$py" -c "import os, zipfile; z=zipfile.ZipFile(os.environ['ZIP_NAME'],'w',zipfile.ZIP_DEFLATED); z.write(os.environ['LIB_NAME'], os.environ['LIB_NAME'])"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: workbuddy_${{ needs.version.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          ls -l
+          sha256sum *.zip | tee checksums.txt
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(dist/*.zip dist/checksums.txt)
+          if [[ ${#assets[@]} -lt 2 ]]; then
+            echo "expected zip archives and checksums.txt" >&2
+            ls -la dist >&2 || true
+            exit 1
+          fi
+          notes="$(mktemp)"
+          cat > "${notes}" <<EOF
+          workbuddy CLIProxyAPI plugin ${GITHUB_REF_NAME}
+
+          Plugin-store archives (\`workbuddy_${VERSION}_<goos>_<goarch>.zip\`), each with the dynamic library at the zip root, plus \`checksums.txt\`.
+
+          ## Install (linux/amd64 Docker example)
+
+          \`\`\`bash
+          unzip workbuddy_${VERSION}_linux_amd64.zip
+          mkdir -p plugins/linux/amd64
+          cp workbuddy.so plugins/linux/amd64/
+          \`\`\`
+
+          Enable \`plugins.configs.workbuddy.enabled\` in \`config.yaml\` and restart CPA.
+          EOF
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+              --title "workbuddy ${GITHUB_REF_NAME}" \
+              --notes-file "${notes}"
+          fi
+
+  snapshot:
+    name: snapshot artifacts
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.zip | tee checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workbuddy-${{ needs.version.outputs.version }}-all
+          path: |
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error

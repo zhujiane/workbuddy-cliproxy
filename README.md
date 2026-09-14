@@ -16,16 +16,41 @@
 
 ## 安装
 
-**前置**:运行中的 CLIProxyAPI v7.2.x(带 CGO / 插件支持)、CodeBuddy 账号、Go 1.26+ 与 gcc;编译架构需与 CPA 实例一致(amd64 / arm64)。
+**前置**:运行中的 CLIProxyAPI v7.2.x(带 CGO / 插件支持)、CodeBuddy 账号。编译架构需与 CPA 实例一致(amd64 / arm64)。Docker 部署必须把宿主 `plugins/` 挂到容器 `/CLIProxyAPI/plugins`,否则重启会丢插件。
+
+CPA 按 `plugins/<goos>/<goarch>/` 再回落到 `plugins/` 查找动态库,Docker linux/amd64 推荐放到 `plugins/linux/amd64/workbuddy.so`。
+
+### 从 GitHub Release 安装(推荐)
+
+打 `v*` 标签后,Actions 会发布符合 [CLIProxyAPI 插件商店](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store) 规范的产物:
+
+| 文件 | 内容 |
+|------|------|
+| `workbuddy_<version>_linux_amd64.zip` | `workbuddy.so` |
+| `workbuddy_<version>_linux_arm64.zip` | `workbuddy.so` |
+| `workbuddy_<version>_darwin_amd64.zip` | `workbuddy.dylib` |
+| `workbuddy_<version>_darwin_arm64.zip` | `workbuddy.dylib` |
+| `workbuddy_<version>_windows_amd64.zip` | `workbuddy.dll` |
+| `checksums.txt` | 各 zip 的 SHA256 |
 
 ```bash
-git clone https://github.com/lovingfish/workbuddy-cliproxy.git
-cd workbuddy-cliproxy
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-  go build -buildmode=c-shared -o workbuddy.so .
+# 以 linux/amd64 为例;把 <version> 换成 Releases 里的版本号(不带 v)
+# https://github.com/zhujiane/workbuddy-cliproxy/releases
+unzip workbuddy_<version>_linux_amd64.zip
+mkdir -p /path/to/CLIProxyAPI/plugins/linux/amd64
+cp workbuddy.so /path/to/CLIProxyAPI/plugins/linux/amd64/
 ```
 
-产物:`.so`(Linux)/ `.dylib`(macOS)/ `.dll`(Windows)。放到 CPA 的 `plugins/` 目录,在 `config.yaml` 启用:
+Docker Compose(官方 compose 已挂载 `./plugins`):
+
+```bash
+cd /path/to/CLIProxyAPI
+unzip workbuddy_<version>_linux_amd64.zip
+mkdir -p plugins/linux/amd64
+cp workbuddy.so plugins/linux/amd64/
+```
+
+`config.yaml` 启用:
 
 ```yaml
 plugins:
@@ -35,7 +60,56 @@ plugins:
     workbuddy: { enabled: true, priority: 100 }
 ```
 
-重启 CPA,日志出现 `plugin loaded ... plugin_id=workbuddy` 即成功,`GET /v1/models` 也能看到上面的模型。然后到 CPA 面板添加 workbuddy 凭据,扫码登录 CodeBuddy。
+重启 CPA:
+
+```bash
+docker compose restart cli-proxy-api
+# 或 docker restart cli-proxy-api
+```
+
+日志出现 `plugin loaded ... plugin_id=workbuddy` 即成功,`GET /v1/models` 也能看到上面的模型。然后到 CPA 面板添加 workbuddy 凭据,扫码登录 CodeBuddy。
+
+### 从源码编译
+
+需要 Go 1.26+ 与 gcc。
+
+```bash
+git clone https://github.com/zhujiane/workbuddy-cliproxy.git
+cd workbuddy-cliproxy
+make build                          # 当前平台
+# 或指定目标: make build GOOS=linux GOARCH=amd64
+```
+
+装进已挂载的 CPA 插件目录并重启容器:
+
+```bash
+make install PLUGIN_DIR=/path/to/CLIProxyAPI/plugins RESTART_DOCKER=cli-proxy-api
+```
+
+等价手搓:
+
+```bash
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+  go build -buildmode=c-shared -ldflags "-s -w -X main.pluginVersion=0.1.0" \
+  -o workbuddy.so .
+```
+
+### GitHub Actions 自动构建
+
+| 触发 | 工作流 | 产物 |
+|------|--------|------|
+| push / PR 到 `dev`、`main` | [ci.yml](.github/workflows/ci.yml) | 跑测试,并上传 `linux/amd64` zip(Actions Artifacts,保留 14 天) |
+| 推送标签 `vX.Y.Z`(如 `v0.1.0`) | [release.yml](.github/workflows/release.yml) | 多平台 zip + `checksums.txt`,发布到 GitHub Release |
+| 手动 `workflow_dispatch` | `release.yml` | 同样打多平台包,但**不**发 Release(只当快照 Artifact) |
+
+发正式版:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签必须是 `v` + 数字开头版本(`v0.1.0`),CPA 插件商店用它当插件版本。zip 内必须是根目录下的 `workbuddy.so` / `.dylib` / `.dll`,不要套一层文件夹。
 
 ## 使用
 

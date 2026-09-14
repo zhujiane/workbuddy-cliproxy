@@ -3,6 +3,7 @@
 *.dylib
 *.dll
 *.h
+/dist/
 
 # 凭据(含 access/refresh token,切勿提交)
 workbuddy.json

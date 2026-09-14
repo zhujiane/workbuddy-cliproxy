@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master, dev]
+    paths-ignore:
+      - "README.md"
+      - "LICENSE"
+  pull_request:
+    branches: [main, master, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: CGO_ENABLED=1 go test ./...
+
+  build-linux-amd64:
+    name: build linux/amd64
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and zip
+        run: |
+          set -euo pipefail
+          version="0.0.0+$(git rev-parse --short HEAD)"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+            go build -buildmode=c-shared \
+            -ldflags "-s -w -X main.pluginVersion=${version}" \
+            -o workbuddy.so .
+          rm -f workbuddy.h
+          python3 -c "import zipfile; z=zipfile.ZipFile('workbuddy_${version}_linux_amd64.zip','w',zipfile.ZIP_DEFLATED); z.write('workbuddy.so','workbuddy.so')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workbuddy-linux-amd64
+          path: workbuddy_*.zip
+          if-no-files-found: error
+          retention-days: 14

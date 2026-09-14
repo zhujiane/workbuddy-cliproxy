@@ -75,9 +75,15 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
+// pluginVersion is the plugin release version. Release builds override it:
+//
+//	go build -ldflags "-X main.pluginVersion=0.1.0"
+var pluginVersion = "0.1.0"
+
 const (
-	providerName  = "workbuddy"
-	upstreamBase  = "https://copilot.tencent.com"
+	providerName     = "workbuddy"
+	pluginRepository = "https://github.com/zhujiane/workbuddy-cliproxy"
+	upstreamBase     = "https://copilot.tencent.com"
 	clientUA      = "CLI/2.63.2 CodeBuddy/2.63.2"
 	originReferer = "https://www.codebuddy.cn"
 
@@ -300,9 +306,9 @@ func wbRegistration() registration {
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata: pluginapi.Metadata{
 			Name:             providerName,
-			Version:          "0.1.0",
+			Version:          pluginVersion,
 			Author:           "lovingfish (clean-room rebuild; original workbuddy by Sliverkiss)",
-			GitHubRepository: "https://github.com/lovingfish/workbuddy-cliproxy",
+			GitHubRepository: pluginRepository,
 		},
 		Capabilities: registrationCapability{
 			ManagementAPI:         true,
