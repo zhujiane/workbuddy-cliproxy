@@ -21,9 +21,11 @@
 
 ## 模型
 
-`glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `deepseek-v4-pro` · `deepseek-v4-flash` · `deepseek-v4.1-flash`
+`glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `hy4-preview` · `gpt-6-astra` · `deepseek-v4-pro` · `deepseek-v4-flash` · `deepseek-v4.1-flash`
 
 具体可用性以 CodeBuddy 账号权限为准。
+
+Hy4 Preview 和 GPT-6-Astra 的请求模型 ID 分别为 `hy4-preview` 和 `gpt-6-astra`，国内、国际插件均注册。上下文上限暂不声明，输出上限沿用插件的 8192 token 配置。
 
 ## 安装
 
