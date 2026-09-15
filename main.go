@@ -62,6 +62,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -77,8 +78,8 @@ import (
 
 // pluginVersion is the plugin release version. Release builds override it:
 //
-//	go build -ldflags "-X main.pluginVersion=0.1.0"
-var pluginVersion = "0.1.0"
+//	go build -ldflags "-X main.pluginVersion=0.2.1"
+var pluginVersion = "0.2.1"
 
 var providerName = "workbuddy-cn"
 
@@ -151,7 +152,13 @@ func cliproxyPluginCall(method *C.char, request *C.uint8_t, requestLen C.size_t,
 	}
 	raw, errHandle := handleMethod(C.GoString(method), requestBytes)
 	if errHandle != nil {
-		writeResponse(response, errorEnvelope("plugin_error", errHandle.Error()))
+		failure := &envelopeError{Code: "plugin_error", Message: errHandle.Error()}
+		var upstream *upstreamError
+		if errors.As(errHandle, &upstream) {
+			failure.HTTPStatus = upstream.status
+		}
+		encoded, _ := json.Marshal(envelope{Error: failure})
+		writeResponse(response, encoded)
 		return 1
 	}
 	writeResponse(response, raw)
@@ -219,8 +226,8 @@ func streamEmitError(streamID, message string) {
 	if streamID == "" {
 		return
 	}
-	errJSON, _ := json.Marshal(map[string]any{"error": map[string]any{"message": message}})
-	_ = streamEmit(streamID, errJSON)
+	body, _ := json.Marshal(map[string]any{"stream_id": streamID, "error": message})
+	_, _ = hostCall(pluginabi.MethodHostStreamClose, body)
 }
 
 func streamClose(streamID string) {
@@ -277,8 +284,9 @@ type envelope struct {
 }
 
 type envelopeError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	HTTPStatus int    `json:"http_status,omitempty"`
 }
 
 type identifierResponse struct {
@@ -351,6 +359,19 @@ func wbModels() []pluginapi.ModelInfo {
 	}
 	models := make([]pluginapi.ModelInfo, 0, len(specs))
 	for _, m := range specs {
+		var thinking *pluginapi.ThinkingSupport
+		var parameters []string
+		if strings.HasPrefix(m.id, "hy3") || strings.HasPrefix(m.id, "deepseek-") {
+			thinking = &pluginapi.ThinkingSupport{Levels: []string{"high"}}
+			parameters = []string{"reasoning_effort"}
+			if strings.HasPrefix(m.id, "deepseek-") {
+				thinking.Levels = []string{"low", "high", "max"}
+			}
+		}
+		inputs := []string{"text"}
+		if m.id == "deepseek-v4.1-flash" || m.id == "glm-5v-turbo" {
+			inputs = append(inputs, "image")
+		}
 		models = append(models, pluginapi.ModelInfo{
 			ID:                         m.id,
 			Object:                     "model",
@@ -361,6 +382,10 @@ func wbModels() []pluginapi.ModelInfo {
 			ContextLength:              m.contextLength,
 			MaxCompletionTokens:        maxCompletionTokens,
 			UserDefined:                true,
+			Thinking:                   thinking,
+			SupportedParameters:        parameters,
+			SupportedInputModalities:   inputs,
+			SupportedOutputModalities:  []string{"text"},
 		})
 	}
 	return models
@@ -443,6 +468,7 @@ func sharedHTTPClient() *http.Client {
 		sharedClient = &http.Client{
 			Timeout: 120 * time.Second,
 			Transport: &http.Transport{
+				Proxy:               http.ProxyFromEnvironment,
 				MaxIdleConns:        20,
 				IdleConnTimeout:     90 * time.Second,
 				MaxIdleConnsPerHost: 5,
@@ -741,7 +767,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	backendHeaders(httpReq, sa)
-	resp, err := sharedHTTPClient().Do(httpReq)
+	resp, err := openUpstream(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http_error: %w", err)
 	}
@@ -778,7 +804,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 	if len(body) == 0 {
 		body = req.OriginalRequest
 	}
-	body = rewriteSystemForUpstream(body)
+	body = rewriteSystemForUpstream(forceStreamBody(body, req.OriginalRequest))
 
 	headers := streamHeaders()
 	sseFramed := clientNeedsSSEFrame(req.Metadata)
@@ -792,8 +818,8 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		return okEnvelope(streamResponse{Headers: headers, Chunks: chunks})
 	}
 
-	// Async: return immediately with empty chunks. A goroutine pumps the upstream
-	// and emits each chunk via host.stream.emit so the client sees true streaming.
+	// Validate upstream response headers before committing a successful stream.
+	// Then emit chunks asynchronously so the client sees true streaming.
 	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		streamEmitError(req.StreamID, err.Error())
@@ -801,7 +827,11 @@ func handleExecStream(raw []byte) ([]byte, error) {
 		return okEnvelope(streamResponse{Headers: headers})
 	}
 	backendHeaders(httpReq, sa)
-	go pumpUpstreamStream(httpReq, req.StreamID, sseFramed)
+	resp, err := openUpstream(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	go pumpUpstreamStream(resp, req.StreamID, sseFramed)
 	return okEnvelope(streamResponse{Headers: headers})
 }
 
@@ -817,13 +847,7 @@ func streamHeaders() http.Header {
 // emits each cleaned chunk to the host stream. It closes the stream when done.
 // An emit failure (client disconnected → host closed the stream) aborts the
 // pump so we stop reading a dead upstream.
-func pumpUpstreamStream(httpReq *http.Request, streamID string, sseFramed bool) {
-	resp, err := sharedHTTPClient().Do(httpReq)
-	if err != nil {
-		streamEmitError(streamID, fmt.Sprintf("http_error: %v", err))
-		streamClose(streamID)
-		return
-	}
+func pumpUpstreamStream(resp *http.Response, streamID string, sseFramed bool) {
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		errPayload, _ := io.ReadAll(resp.Body)
@@ -838,6 +862,10 @@ func pumpUpstreamStream(httpReq *http.Request, streamID string, sseFramed bool) 
 		if content == "" || content == "[DONE]" {
 			continue
 		}
+		if err := upstreamEventError(content); err != nil {
+			streamEmitError(streamID, err.Error())
+			return
+		}
 		cleaned := cleanChunkJSON(content)
 		if cleaned == "" {
 			continue
@@ -848,6 +876,9 @@ func pumpUpstreamStream(httpReq *http.Request, streamID string, sseFramed bool) 
 		if err := streamEmit(streamID, []byte(cleaned)); err != nil {
 			break
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		streamEmitError(streamID, fmt.Sprintf("upstream stream read failed: %v", err))
 	}
 	streamClose(streamID)
 }
@@ -860,7 +891,7 @@ func collectUpstreamStream(body []byte, sa *storedAuth, sseFramed bool) ([]plugi
 		return nil, err
 	}
 	backendHeaders(httpReq, sa)
-	resp, err := sharedHTTPClient().Do(httpReq)
+	resp, err := openUpstream(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("http_error: %w", err)
 	}
@@ -869,7 +900,7 @@ func collectUpstreamStream(body []byte, sa *storedAuth, sseFramed bool) ([]plugi
 		errPayload, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("upstream %d: %s", resp.StatusCode, truncate(string(errPayload), 200))
 	}
-	return aggregateSSE(resp.Body, sseFramed), nil
+	return aggregateSSEChecked(resp.Body, sseFramed)
 }
 
 // clientNeedsSSEFrame reports whether chunk payloads must carry their own
@@ -895,6 +926,11 @@ func clientNeedsSSEFrame(metadata map[string]any) bool {
 // the payload is the raw JSON object and the host chat-completions writer adds
 // the framing itself.
 func aggregateSSE(r io.Reader, sseFramed bool) []pluginapi.ExecutorStreamChunk {
+	chunks, _ := aggregateSSEChecked(r, sseFramed)
+	return chunks
+}
+
+func aggregateSSEChecked(r io.Reader, sseFramed bool) ([]pluginapi.ExecutorStreamChunk, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	var chunks []pluginapi.ExecutorStreamChunk
@@ -902,6 +938,9 @@ func aggregateSSE(r io.Reader, sseFramed bool) []pluginapi.ExecutorStreamChunk {
 		content := stripDataPrefix(scanner.Text())
 		if content == "" || content == "[DONE]" {
 			continue
+		}
+		if err := upstreamEventError(content); err != nil {
+			return nil, err
 		}
 		cleaned := cleanChunkJSON(content)
 		if cleaned == "" {
@@ -912,7 +951,10 @@ func aggregateSSE(r io.Reader, sseFramed bool) []pluginapi.ExecutorStreamChunk {
 		}
 		chunks = append(chunks, pluginapi.ExecutorStreamChunk{Payload: []byte(cleaned)})
 	}
-	return chunks
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("upstream stream read failed: %w", err)
+	}
+	return chunks, nil
 }
 
 // cleanChunkJSON strips empty-valued fields (null/""/[]/{}) from choice deltas
@@ -993,6 +1035,17 @@ func rewriteSystemForUpstream(payload []byte) []byte {
 	}
 	messages, _ := obj["messages"].([]any)
 	changed := false
+	if len(messages) > 0 {
+		first, _ := messages[0].(map[string]any)
+		if first["role"] == "developer" {
+			first["role"] = "system"
+			changed = true
+		} else if first["role"] != "system" {
+			messages = append([]any{map[string]any{"role": "system", "content": "You are a helpful assistant."}}, messages...)
+			obj["messages"] = messages
+			changed = true
+		}
+	}
 	for _, m := range messages {
 		msg, ok := m.(map[string]any)
 		if !ok {
@@ -1054,12 +1107,20 @@ func sanitizeBlockedTemplates(s string) string {
 	return s
 }
 
-// forceMaxThinking pins reasoning_effort to "high" for hy3-family models so
-// Tencent Hunyuan 3 always reasons at maximum depth. CodeBuddy only honors
-// "high" for deep thinking (medium/low/max/xhigh/ultra all fall back to no
-// reasoning), so we override whatever the client sent. Returns true if changed.
+// forceMaxThinking defaults DeepSeek to high without overriding explicit
+// controls, and preserves the historical forced-high behavior for hy3.
 func forceMaxThinking(obj map[string]any) bool {
 	model, _ := obj["model"].(string)
+	if strings.HasPrefix(model, "deepseek-") {
+		if _, present := obj["reasoning_effort"]; present {
+			return false
+		}
+		if _, present := obj["thinking"]; present {
+			return false
+		}
+		obj["reasoning_effort"] = "high"
+		return true
+	}
 	if !strings.HasPrefix(model, "hy3") {
 		return false
 	}
@@ -1084,6 +1145,9 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 		data := stripDataPrefix(scanner.Text())
 		if data == "" || data == "[DONE]" {
 			continue
+		}
+		if err := upstreamEventError(data); err != nil {
+			return nil, err
 		}
 		var chunk map[string]any
 		if json.Unmarshal([]byte(data), &chunk) != nil {
@@ -1128,6 +1192,9 @@ func aggregateCompletion(r io.Reader, model string) ([]byte, error) {
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("upstream stream read failed: %w", err)
+	}
 	message := map[string]any{"role": firstNonEmpty(role, "assistant"), "content": content}
 	if reasoning != "" {
 		message["reasoning_content"] = reasoning

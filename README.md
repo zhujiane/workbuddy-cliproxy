@@ -1,5 +1,39 @@
 # workbuddy-cliproxy
 
+## 0.2.1：视觉、思考配置与运行中断修复
+
+- DeepSeek V4.1 Flash 注册 `text/image` 输入能力；图片内容完整透传。
+- DeepSeek 模型注册 `low/high/max` 思考等级，未指定时默认 `reasoning_effort=high`；显式传入的 `reasoning_effort` 或 `thinking` 保留。hy3 保持历史的强制 high 行为。其他模型的未验证思考等级不作推测。
+- CodeBuddy 要求第一条消息为 system（否则 HTTP 400、业务码 `11128`、`first message is not system prompt`）。插件为缺失 system 的对话补充默认 system，并将首条 developer 转为 system。
+- HTTP 错误通过插件 ABI 保留真实状态码；流式响应在上游响应头校验成功后才开始。连接错误和 HTTP 502/503/504 在响应开始前最多尝试 3 次；400/401/429 不在插件内盲目重试，交由 CPA 处理。已输出的流不重放，避免重复执行工具。
+- 聊天流取消原有 120 秒整轮超时；读取失败和上游错误事件向 CPA 报错，避免被当作正常结束。认证和配额请求仍保留超时。
+
+### CPA 与 DSH 的能力配置
+
+旧版 CPA `/v1/models` 只返回 id/object/created/owned_by，即使插件注册能力也会被过滤。本次同时修复 CPA 的 OpenAI 模型列表，保留 `thinking`、`supported_input_modalities`、`supported_output_modalities`、`supported_parameters` 和上下文/输出长度。仅安装插件到未修复的 CPA，模型列表仍可能缺少这些字段。
+
+当前 DSH 自定义提供方的模型发现只读取名称和长度，不导入图片与思考能力。请在已有 `$DSH_HOME/settings.yaml` 的对应提供方下合并以下字段（`your-cpa-provider` 替换为现有 Provider ID；保留已有地址和凭据配置）：
+
+```yaml
+llm-pi-ai:
+  providers:
+    your-cpa-provider:
+      models:
+        - id: deepseek-v4.1-flash
+          input: [text, image]
+          reasoningEfforts:
+            low: low
+            high: high
+            max: max
+          compat:
+            thinkingFormat: openai
+            supportsReasoningEffort: true
+```
+
+不要覆盖整个 models 列表；仅修改 DeepSeek 对应项。目录提供方请将对应模型配置放在 `modelOverrides.deepseek-v4.1-flash` 下（省略 id）。DSH 配置变更在下一次请求生效。
+
+在线验证：`CPA_API_KEY=<API密钥> node smoke.mjs http://127.0.0.1:8317`。脚本检查模型元数据，并实际调用普通、流式、内嵌红色 PNG 三种请求，会消耗少量模型额度。测试不带 system 的请求同时验证 `11128` 修复和默认思考。
+
 ## 国内 / 国际双入口（0.2.0）
 
 - `workbuddy-cn.so`：国内站 OAuth、认证文件与请求转发。

@@ -1,0 +1,47 @@
+diff --git a/internal/registry/model_registry.go b/internal/registry/model_registry.go
+index fc7f3776..b7fbf3b2 100644
+--- a/internal/registry/model_registry.go
++++ b/internal/registry/model_registry.go
+@@ -1530,6 +1530,17 @@ func (r *ModelRegistry) convertModelToMap(model *ModelInfo, handlerType string)
+ 		if len(model.SupportedParameters) > 0 {
+ 			result["supported_parameters"] = append([]string(nil), model.SupportedParameters...)
+ 		}
++		if len(model.SupportedInputModalities) > 0 {
++			result["supported_input_modalities"] = append([]string(nil), model.SupportedInputModalities...)
++		}
++		if len(model.SupportedOutputModalities) > 0 {
++			result["supported_output_modalities"] = append([]string(nil), model.SupportedOutputModalities...)
++		}
++		if model.Thinking != nil {
++			thinking := *model.Thinking
++			thinking.Levels = append([]string(nil), model.Thinking.Levels...)
++			result["thinking"] = &thinking
++		}
+ 		return result
+ 
+ 	case "claude":
+diff --git a/sdk/api/handlers/openai/openai_handlers.go b/sdk/api/handlers/openai/openai_handlers.go
+index a5d1fa20..18c8cb6d 100644
+--- a/sdk/api/handlers/openai/openai_handlers.go
++++ b/sdk/api/handlers/openai/openai_handlers.go
+@@ -68,7 +68,7 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
+ 	// Get all available models
+ 	allModels := h.Models()
+ 
+-	// Filter to only include the 4 required fields: id, object, created, owned_by
++	// Preserve public model capability extensions for gateway clients.
+ 	filteredModels := make([]map[string]any, len(allModels))
+ 	for i, model := range allModels {
+ 		filteredModel := map[string]any{
+@@ -85,6 +85,11 @@ func (h *OpenAIAPIHandler) OpenAIModels(c *gin.Context) {
+ 		if ownedBy, exists := model["owned_by"]; exists {
+ 			filteredModel["owned_by"] = ownedBy
+ 		}
++		for _, key := range []string{"display_name", "context_length", "max_context_length", "max_completion_tokens", "supported_parameters", "supported_input_modalities", "supported_output_modalities", "thinking"} {
++			if value, exists := model[key]; exists {
++				filteredModel[key] = value
++			}
++		}
+ 
+ 		filteredModels[i] = filteredModel
+ 	}
