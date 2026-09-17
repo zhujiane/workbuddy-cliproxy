@@ -78,8 +78,8 @@ import (
 
 // pluginVersion is the plugin release version. Release builds override it:
 //
-//	go build -ldflags "-X main.pluginVersion=0.2.1"
-var pluginVersion = "0.2.1"
+//	go build -ldflags "-X main.pluginVersion=0.2.2"
+var pluginVersion = "0.2.2"
 
 var providerName = "workbuddy-cn"
 
@@ -362,15 +362,23 @@ func wbModels() []pluginapi.ModelInfo {
 	if providerName == "workbuddy" {
 		// Advertise the default 300k context; GLM-5.3 also supports 1M.
 		specs = append(specs, modelSpec{"glm-5.3", "GLM-5.3", 300000, false})
+	} else if providerName == "workbuddy-cn" {
+		// The domestic WorkBuddy catalog exposes both GLM-5.3 variants with a
+		// 300k default context (the UI can expand either one to 1M). Flash is
+		// the native multimodal variant; the full model remains text-only.
+		specs = append(specs,
+			modelSpec{"glm-5.3-flash", "GLM-5.3-Flash", 300000, true},
+			modelSpec{"glm-5.3", "GLM-5.3", 300000, false},
+		)
 	}
 	models := make([]pluginapi.ModelInfo, 0, len(specs))
 	for _, m := range specs {
 		var thinking *pluginapi.ThinkingSupport
 		var parameters []string
-		if strings.HasPrefix(m.id, "hy3") || strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" {
+		if strings.HasPrefix(m.id, "hy3") || strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" || m.id == "glm-5.3-flash" {
 			thinking = &pluginapi.ThinkingSupport{Levels: []string{"high"}}
 			parameters = []string{"reasoning_effort"}
-			if strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" {
+			if strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" || m.id == "glm-5.3-flash" {
 				thinking.Levels = []string{"low", "high", "max"}
 			}
 		}
@@ -1113,11 +1121,11 @@ func sanitizeBlockedTemplates(s string) string {
 	return s
 }
 
-// forceMaxThinking defaults DeepSeek and GLM-5.3 to high without overriding explicit
+// forceMaxThinking defaults DeepSeek and GLM-5.3 variants to high without overriding explicit
 // controls, and preserves the historical forced-high behavior for hy3.
 func forceMaxThinking(obj map[string]any) bool {
 	model, _ := obj["model"].(string)
-	if strings.HasPrefix(model, "deepseek-") || model == "glm-5.3" {
+	if strings.HasPrefix(model, "deepseek-") || model == "glm-5.3" || model == "glm-5.3-flash" {
 		if _, present := obj["reasoning_effort"]; present {
 			return false
 		}

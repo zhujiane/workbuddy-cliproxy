@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added domestic (`workbuddy-cn`) GLM-5.3 and GLM-5.3-Flash support. Both advertise the 300,000-token default context, selectable `low` / `high` / `max` reasoning, and a default `high` effort; Flash also advertises native image input.
+
 - Fixed missing image input metadata for GLM-5.2, Kimi-K2.7, MiniMax-M3, Hy3, and DeepSeek-V4 Pro/Flash in both providers. Keep vision capability explicit per model; preserve text-only declarations for unconfirmed variants.
 
 - Added international (`workbuddy`) GLM-5.3 support with `low`, `high`, and `max` thinking levels; default to `high` while preserving explicit reasoning controls. Advertises the default 300,000-token context (supports expansion to 1,000,000).

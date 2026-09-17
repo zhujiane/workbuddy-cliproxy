@@ -1,7 +1,7 @@
 PLUGIN_ID ?= workbuddy-cn
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
-VERSION ?= 0.2.1
+VERSION ?= 0.2.2
 PLUGIN_DIR ?=
 
 ifeq ($(GOOS),windows)

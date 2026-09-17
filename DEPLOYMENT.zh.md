@@ -1,3 +1,9 @@
+# 2026-09-17 国内版 GLM-5.3 支持
+
+已将国内插件 `workbuddy-cn` 增加 `glm-5.3-flash` 与 `glm-5.3`，并重新构建国际插件保持同一版本 `0.2.2`。两个模型默认上下文为 300K，支持 `low` / `high` / `max` 推理档位，未指定时插件补 `high`；Flash 声明 `text/image` 输入，完整 GLM-5.3 声明文本输入。已用国内账号直接请求两个模型，并通过 CPA 发送 Flash 图片请求验证成功。
+
+部署位置：`/root/work/CLIProxyAPI/plugins/linux/amd64/`。旧动态库备份在 `/root/work/CLIProxyAPI/backups/glm53-domestic-20260917-020029/`，容器 `cli-proxy-api` 已重启并加载 `workbuddy-cn` / `workbuddy` 版本 `0.2.2`。CPA 当前 `/v1/models` 能看到 `glm-5.3-flash` 的国内 provider 条目；同名 `glm-5.3` 会由 CPA 按可用账号池选择对应 provider。
+
 # 2026-09-15 修复记录
 
 ## 根因
@@ -8,7 +14,7 @@ CPA 日志中 DeepSeek V4.1 Flash 的原始错误是 HTTP 400，CodeBuddy 业务
 
 ## 部署
 
-- 两个插件：`workbuddy` / `workbuddy-cn`，版本 0.2.1。
+- 两个插件：`workbuddy` / `workbuddy-cn`，版本 0.2.2。
 - CPA：基于原运行版本 v7.2.157 的提交 `09a29bd`，只修改模型列表序列化与字段过滤。未用工作目录的新版本整体替换旧版本。
 - CPA 镜像：`local/cpa-workbuddy:7.2.157-0.2.1`。
 - 镜像选择：`/root/work/CLIProxyAPI/docker-compose.override.yml`；常规 `docker compose up -d` 会自动使用该文件。本地修复镜像设置 `pull_policy: never`。如显式使用 `-f`，须同时包含 override 文件。

@@ -92,49 +92,64 @@ func TestDeepSeekCapabilities(t *testing.T) {
 	t.Fatal("model missing")
 }
 
-func TestGLM53InternationalCapabilities(t *testing.T) {
+func TestGLM53Capabilities(t *testing.T) {
 	previous := providerName
 	t.Cleanup(func() { providerName = previous })
 	for _, provider := range []string{"workbuddy", "workbuddy-cn"} {
 		providerName = provider
-		found := false
+		want := map[string]bool{"glm-5.3": true}
+		if provider == "workbuddy-cn" {
+			want["glm-5.3-flash"] = true
+		}
+		found := map[string]bool{}
 		for _, m := range wbModels() {
-			if m.ID != "glm-5.3" {
+			if !want[m.ID] {
 				continue
 			}
-			found = true
+			found[m.ID] = true
 			if m.ContextLength != 300000 || m.OwnedBy != provider || m.Thinking == nil || strings.Join(m.Thinking.Levels, ",") != "low,high,max" || strings.Join(m.SupportedParameters, ",") != "reasoning_effort" {
 				t.Fatalf("unexpected GLM-5.3 capabilities: %+v", m)
 			}
+			wantInputs := "text"
+			if m.ID == "glm-5.3-flash" {
+				wantInputs = "text,image"
+			}
+			if strings.Join(m.SupportedInputModalities, ",") != wantInputs || strings.Join(m.SupportedOutputModalities, ",") != "text" {
+				t.Fatalf("unexpected GLM-5.3 modalities: %+v", m)
+			}
 		}
-		if found != (provider == "workbuddy") {
-			t.Fatalf("GLM-5.3 registration for %s = %v", provider, found)
+		for id := range want {
+			if !found[id] {
+				t.Fatalf("%s registration for %s missing", provider, id)
+			}
 		}
 	}
 }
 
 func TestGLM53UpstreamThinking(t *testing.T) {
-	for _, control := range []string{``, `,"reasoning_effort":"low"`, `,"reasoning_effort":"high"`, `,"reasoning_effort":"max"`, `,"thinking":{"type":"disabled"}`} {
-		input := `{"model":"glm-5.3","messages":[{"role":"user","content":"hello"}]` + control + `}`
-		var body map[string]json.RawMessage
-		if err := json.Unmarshal(rewriteSystemForUpstream([]byte(input)), &body); err != nil {
-			t.Fatal(err)
-		}
-		if string(body["model"]) != `"glm-5.3"` {
-			t.Fatal("model changed")
-		}
-		if control == "" {
-			if string(body["reasoning_effort"]) != `"high"` {
-				t.Fatal("missing default high")
-			}
-		} else {
-			var original map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(input), &original); err != nil {
+	for _, model := range []string{"glm-5.3", "glm-5.3-flash"} {
+		for _, control := range []string{``, `,"reasoning_effort":"low"`, `,"reasoning_effort":"high"`, `,"reasoning_effort":"max"`, `,"thinking":{"type":"disabled"}`} {
+			input := `{"model":"` + model + `","messages":[{"role":"user","content":"hello"}]` + control + `}`
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rewriteSystemForUpstream([]byte(input)), &body); err != nil {
 				t.Fatal(err)
 			}
-			for _, key := range []string{"reasoning_effort", "thinking"} {
-				if string(body[key]) != string(original[key]) {
-					t.Fatalf("%s changed: %s", key, body[key])
+			if string(body["model"]) != `"`+model+`"` {
+				t.Fatal("model changed")
+			}
+			if control == "" {
+				if string(body["reasoning_effort"]) != `"high"` {
+					t.Fatal("missing default high")
+				}
+			} else {
+				var original map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(input), &original); err != nil {
+					t.Fatal(err)
+				}
+				for _, key := range []string{"reasoning_effort", "thinking"} {
+					if string(body[key]) != string(original[key]) {
+						t.Fatalf("%s changed: %s", key, body[key])
+					}
 				}
 			}
 		}
@@ -151,17 +166,25 @@ func TestVisionModelsPreserveImageParts(t *testing.T) {
 	t.Cleanup(func() { providerName = previous })
 	for _, provider := range []string{"workbuddy", "workbuddy-cn"} {
 		providerName = provider
+		providerExpected := expected
+		if provider == "workbuddy-cn" {
+			providerExpected = map[string]bool{}
+			for id, value := range expected {
+				providerExpected[id] = value
+			}
+			providerExpected["glm-5.3-flash"] = true
+		}
 		seen := 0
 		for _, model := range wbModels() {
 			wantInputs := "text"
-			if expected[model.ID] {
+			if providerExpected[model.ID] {
 				wantInputs = "text,image"
 				seen++
 			}
 			if strings.Join(model.SupportedInputModalities, ",") != wantInputs || strings.Join(model.SupportedOutputModalities, ",") != "text" {
 				t.Fatalf("%s/%s: unexpected modalities", provider, model.ID)
 			}
-			if !expected[model.ID] {
+			if !providerExpected[model.ID] {
 				continue
 			}
 			t.Run(provider+"/"+model.ID, func(t *testing.T) {
@@ -189,7 +212,7 @@ func TestVisionModelsPreserveImageParts(t *testing.T) {
 				}
 			})
 		}
-		if seen != len(expected) {
+		if seen != len(providerExpected) {
 			t.Fatalf("%s: missing vision models", provider)
 		}
 	}

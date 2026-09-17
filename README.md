@@ -57,9 +57,9 @@ llm-pi-ai:
 
 `glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `hy4-preview` · `gpt-6-astra` · `deepseek-v4-pro` · `deepseek-v4-flash` · `deepseek-v4.1-flash`
 
-国际版 `workbuddy` 另支持 `glm-5.3`（GLM-5.3），思考强度为 `low` / `high` / `max`，未指定时默认 `high`；显式 `reasoning_effort` 或 `thinking` 设置保持不变。默认上下文为 300,000 token，支持扩展到 1,000,000 token；模型元数据声明默认值 300,000，输出上限沿用 8192 token。
+国内版 `workbuddy-cn` 另支持 `glm-5.3-flash`（GLM-5.3-Flash）和 `glm-5.3`（GLM-5.3）；国际版 `workbuddy` 支持 `glm-5.3`。两版 GLM-5.3 系列思考强度为 `low` / `high` / `max`，未指定时默认 `high`；显式 `reasoning_effort` 或 `thinking` 设置保持不变。国内版两个模型和国际版 GLM-5.3 的默认上下文均为 300,000 token，支持扩展到 1,000,000 token；模型元数据声明默认值 300,000，输出上限沿用 8192 token。
 
-国内和国际插件均声明以下模型支持 `text/image` 输入：`glm-5.2`、`glm-5v-turbo`、`kimi-k2.7`、`minimax-m3-pay`、`hy3`、`deepseek-v4-pro`、`deepseek-v4-flash`、`deepseek-v4.1-flash`。能力依据 [WorkBuddy 官方模型列表](https://www.codebuddy.cn/docs/workbuddyapp/features/Model) 和已有图片验证；图片 URL、内嵌 base64 与 detail 参数完整透传。输出仍声明为文本，图片输入不代表图片生成、音频或视频能力。
+国内和国际插件均声明以下模型支持 `text/image` 输入：`glm-5.2`、`glm-5v-turbo`、`kimi-k2.7`、`minimax-m3-pay`、`hy3`、`deepseek-v4-pro`、`deepseek-v4-flash`、`deepseek-v4.1-flash`；国内版新增的 `glm-5.3-flash` 也支持图片，`glm-5.3` 仍声明为文本输入。能力依据 [WorkBuddy 官方模型列表](https://www.codebuddy.cn/docs/workbuddyapp/features/Model) 和已有图片验证；图片 URL、内嵌 base64 与 detail 参数完整透传。输出仍声明为文本，图片输入不代表图片生成、音频或视频能力。
 
 未确认的模型与预览变体暂不增加图片能力声明；不根据系列名前缀推断。具体可用性以 CodeBuddy 账号权限为准。客户端若不导入模态字段，仍需在客户端配置对应模型的 `input: [text, image]`。
 
