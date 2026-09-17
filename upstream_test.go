@@ -140,3 +140,57 @@ func TestGLM53UpstreamThinking(t *testing.T) {
 		}
 	}
 }
+
+func TestVisionModelsPreserveImageParts(t *testing.T) {
+	expected := map[string]bool{
+		"glm-5.2": true, "glm-5v-turbo": true, "kimi-k2.7": true,
+		"minimax-m3-pay": true, "hy3": true, "deepseek-v4-pro": true,
+		"deepseek-v4-flash": true, "deepseek-v4.1-flash": true,
+	}
+	previous := providerName
+	t.Cleanup(func() { providerName = previous })
+	for _, provider := range []string{"workbuddy", "workbuddy-cn"} {
+		providerName = provider
+		seen := 0
+		for _, model := range wbModels() {
+			wantInputs := "text"
+			if expected[model.ID] {
+				wantInputs = "text,image"
+				seen++
+			}
+			if strings.Join(model.SupportedInputModalities, ",") != wantInputs || strings.Join(model.SupportedOutputModalities, ",") != "text" {
+				t.Fatalf("%s/%s: unexpected modalities", provider, model.ID)
+			}
+			if !expected[model.ID] {
+				continue
+			}
+			t.Run(provider+"/"+model.ID, func(t *testing.T) {
+				for _, url := range []string{"https://example.test/photo.png", "data:image/png;base64,abc"} {
+					original := map[string]any{"model": model.ID, "messages": []any{map[string]any{
+						"role": "user", "content": []any{
+							map[string]any{"type": "text", "text": "Describe this image."},
+							map[string]any{"type": "image_url", "image_url": map[string]any{"url": url, "detail": "high"}},
+						},
+					}}}
+					input, err := json.Marshal(original)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var result map[string]any
+					if err := json.Unmarshal(rewriteSystemForUpstream(input), &result); err != nil {
+						t.Fatal(err)
+					}
+					messages := result["messages"].([]any)
+					last, _ := json.Marshal(messages[len(messages)-1])
+					want, _ := json.Marshal(original["messages"].([]any)[0])
+					if string(last) != string(want) || result["model"] != model.ID {
+						t.Fatalf("multimodal request changed: %s", last)
+					}
+				}
+			})
+		}
+		if seen != len(expected) {
+			t.Fatalf("%s: missing vision models", provider)
+		}
+	}
+}

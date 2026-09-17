@@ -341,26 +341,27 @@ func wbModels() []pluginapi.ModelInfo {
 		id            string
 		name          string
 		contextLength int64
+		vision        bool
 	}
 	specs := []modelSpec{
-		{"glm-5.2", "GLM-5.2", 1000000},
-		{"glm-5.1", "GLM-5.1", 131072},
-		{"glm-5v-turbo", "GLM-5V Turbo", 131072},
-		{"kimi-k2.7", "Kimi K2.7", 262144},
-		{"minimax-m3-pay", "MiniMax M3", 204800},
-		{"hy3", "Hy3", 262144},
-		{"hy3-preview", "Hy3 Preview", 262144},
-		{"hy3-preview-agent", "Hy3 Preview Agent", 262144},
+		{"glm-5.2", "GLM-5.2", 1000000, true},
+		{"glm-5.1", "GLM-5.1", 131072, false},
+		{"glm-5v-turbo", "GLM-5V Turbo", 131072, true},
+		{"kimi-k2.7", "Kimi K2.7", 262144, true},
+		{"minimax-m3-pay", "MiniMax M3", 204800, true},
+		{"hy3", "Hy3", 262144, true},
+		{"hy3-preview", "Hy3 Preview", 262144, false},
+		{"hy3-preview-agent", "Hy3 Preview Agent", 262144, false},
 		// Leave context length unspecified until CodeBuddy limits are confirmed.
-		{"hy4-preview", "Hy4 Preview", 0},
-		{"gpt-6-astra", "GPT-6-Astra", 0},
-		{"deepseek-v4-pro", "DeepSeek V4 Pro", 1000000},
-		{"deepseek-v4-flash", "DeepSeek V4 Flash", 1000000},
-		{"deepseek-v4.1-flash", "DeepSeek V4.1 Flash", 1000000},
+		{"hy4-preview", "Hy4 Preview", 0, false},
+		{"gpt-6-astra", "GPT-6-Astra", 0, false},
+		{"deepseek-v4-pro", "DeepSeek V4 Pro", 1000000, true},
+		{"deepseek-v4-flash", "DeepSeek V4 Flash", 1000000, true},
+		{"deepseek-v4.1-flash", "DeepSeek V4.1 Flash", 1000000, true},
 	}
 	if providerName == "workbuddy" {
 		// Advertise the default 300k context; GLM-5.3 also supports 1M.
-		specs = append(specs, modelSpec{"glm-5.3", "GLM-5.3", 300000})
+		specs = append(specs, modelSpec{"glm-5.3", "GLM-5.3", 300000, false})
 	}
 	models := make([]pluginapi.ModelInfo, 0, len(specs))
 	for _, m := range specs {
@@ -374,7 +375,7 @@ func wbModels() []pluginapi.ModelInfo {
 			}
 		}
 		inputs := []string{"text"}
-		if m.id == "deepseek-v4.1-flash" || m.id == "glm-5v-turbo" {
+		if m.vision {
 			inputs = append(inputs, "image")
 		}
 		models = append(models, pluginapi.ModelInfo{
