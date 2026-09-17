@@ -85,12 +85,14 @@ var providerName = "workbuddy-cn"
 
 var (
 	upstreamBase  = "https://copilot.tencent.com"
+	chatBase      = "https://copilot.tencent.com"
 	originReferer = "https://www.codebuddy.cn"
 )
 
 func init() {
 	if providerName == "workbuddy" {
 		upstreamBase = "https://www.codebuddy.ai"
+		chatBase = "https://www.workbuddy.ai"
 		originReferer = upstreamBase
 	}
 }
@@ -776,7 +778,7 @@ func handleExecExecute(raw []byte) ([]byte, error) {
 	// CodeBuddy rejects non-stream requests (code 11101), so always stream
 	// upstream and fold the chunks into a single chat.completion object.
 	body := rewriteSystemForUpstream(forceStreamBody(req.Payload, req.OriginalRequest))
-	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (chatBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -834,7 +836,7 @@ func handleExecStream(raw []byte) ([]byte, error) {
 
 	// Validate upstream response headers before committing a successful stream.
 	// Then emit chunks asynchronously so the client sees true streaming.
-	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (chatBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		streamEmitError(req.StreamID, err.Error())
 		streamClose(req.StreamID)
@@ -900,7 +902,7 @@ func pumpUpstreamStream(resp *http.Response, streamID string, sseFramed bool) {
 // collectUpstreamStream is the synchronous fallback (no async stream id): drain
 // the upstream, clean each chunk, return them as a slice.
 func collectUpstreamStream(body []byte, sa *storedAuth, sseFramed bool) ([]pluginapi.ExecutorStreamChunk, error) {
-	httpReq, err := http.NewRequest(http.MethodPost, (upstreamBase + "/v2/chat/completions"), bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, (chatBase + "/v2/chat/completions"), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -979,6 +981,11 @@ func cleanChunkJSON(s string) string {
 		return s
 	}
 	if choices, ok := obj["choices"].([]any); ok {
+		// WorkBuddy labels chat deltas as response; CPA requires the OpenAI
+		// chat chunk marker when translating them to Responses events.
+		if obj["object"] == "response" {
+			obj["object"] = "chat.completion.chunk"
+		}
 		for _, c := range choices {
 			choice, ok := c.(map[string]any)
 			if !ok {

@@ -68,6 +68,26 @@ func TestUpstreamRetryAndStatus(t *testing.T) {
 
 type failingReader struct{}
 
+func TestWorkBuddyResponseChunkMarker(t *testing.T) {
+	input := `{"object":"response","choices":[{"delta":{"content":"OK","tool_calls":[]},"finish_reason":"stop"}],"usage":{"total_tokens":3}}`
+	var got map[string]any
+	if err := json.Unmarshal([]byte(cleanChunkJSON(input)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["object"] != "chat.completion.chunk" || got["usage"].(map[string]any)["total_tokens"] != float64(3) {
+		t.Fatalf("invalid normalized chunk: %v", got)
+	}
+	choice := got["choices"].([]any)[0].(map[string]any)
+	if choice["delta"].(map[string]any)["content"] != "OK" || choice["finish_reason"] != "stop" {
+		t.Fatalf("lost completion: %v", choice)
+	}
+	var native map[string]any
+	json.Unmarshal([]byte(cleanChunkJSON(`{"object":"response","output":[]}`)), &native)
+	if native["object"] != "response" {
+		t.Fatal("native Responses object changed")
+	}
+}
+
 func (failingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
 func TestStreamReadFailureIsNotSuccess(t *testing.T) {

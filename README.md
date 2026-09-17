@@ -38,6 +38,7 @@ llm-pi-ai:
 
 - `workbuddy-cn.so`：国内站 OAuth、认证文件与请求转发。
 - `workbuddy.so`：国际站 OAuth、认证文件与请求转发。
+- 国际版聊天请求使用 `https://www.workbuddy.ai/v2/chat/completions`；登录和刷新凭据仍使用 CodeBuddy 国际站接口。
 - 分别构建：`make build PLUGIN_ID=workbuddy-cn VERSION=0.2.0` 和 `make build PLUGIN_ID=workbuddy VERSION=0.2.0`。将两个文件安装到 CPA 插件目录，并启用两个同名配置项。
 - 旧凭据没有 `workbuddy_provider` 字段时按国内站处理；`auth.domain` 包含 `codebuddy.ai` 时按国际站处理。新凭据保存明确的版本标识。已有文件名保持不变。
 - 统一配额页由 `workbuddy` 国际插件提供，同时展示两类账号，支持筛选、中英文、深色模式、手动刷新和每 60 秒自动刷新。

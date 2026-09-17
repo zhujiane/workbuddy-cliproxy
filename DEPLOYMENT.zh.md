@@ -1,3 +1,13 @@
+# 2026-09-17 国际版聊天域名修复
+
+国际插件的三条聊天路径（非流式、异步流式、同步流式）改为请求 `https://www.workbuddy.ai/v2/chat/completions`，与官方 WorkBuddy 客户端一致。登录、凭据刷新和国内插件保持原配置。旧 CodeBuddy 聊天入口对 GPT-6-Astra 返回 11102。
+
+同时将带 `choices` 的上游流事件中 `object: response` 规范为 `chat.completion.chunk`，避免 CPA Responses 转换器丢弃事件、触发空流重试。原生 Responses 对象不受影响，新增回归测试覆盖内容、结束原因和用量保留。
+
+`go test ./...` 和国际插件构建通过，已部署 `workbuddy.so` 并重启 `cli-proxy-api`。旧国际插件备份：`/root/work/CLIProxyAPI/backups/workbuddy-chat-domain-dB4I5ntW/workbuddy.so`。
+
+部署后通过 CPA `/v1/responses` 实测 `gpt-6-astra` 流式请求：HTTP 200，输出 `OK`，收到 `response.completed`。
+
 # 2026-09-17 国内版 GLM-5.3 支持
 
 已将国内插件 `workbuddy-cn` 增加 `glm-5.3-flash` 与 `glm-5.3`，并重新构建国际插件保持同一版本 `0.2.2`。两个模型默认上下文为 300K，支持 `low` / `high` / `max` 推理档位，未指定时插件补 `high`；Flash 声明 `text/image` 输入，完整 GLM-5.3 声明文本输入。已用国内账号直接请求两个模型，并通过 CPA 发送 Flash 图片请求验证成功。
