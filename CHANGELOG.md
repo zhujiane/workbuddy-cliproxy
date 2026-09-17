@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Added international (`workbuddy`) GLM-5.3 support with `low`, `high`, and `max` thinking levels; default to `high` while preserving explicit reasoning controls. Advertises the default 300,000-token context (supports expansion to 1,000,000).
+
 ## [0.2.1] - 2026-09-15
 
 ### Fixed

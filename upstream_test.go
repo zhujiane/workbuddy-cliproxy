@@ -91,3 +91,52 @@ func TestDeepSeekCapabilities(t *testing.T) {
 	}
 	t.Fatal("model missing")
 }
+
+func TestGLM53InternationalCapabilities(t *testing.T) {
+	previous := providerName
+	t.Cleanup(func() { providerName = previous })
+	for _, provider := range []string{"workbuddy", "workbuddy-cn"} {
+		providerName = provider
+		found := false
+		for _, m := range wbModels() {
+			if m.ID != "glm-5.3" {
+				continue
+			}
+			found = true
+			if m.ContextLength != 300000 || m.OwnedBy != provider || m.Thinking == nil || strings.Join(m.Thinking.Levels, ",") != "low,high,max" || strings.Join(m.SupportedParameters, ",") != "reasoning_effort" {
+				t.Fatalf("unexpected GLM-5.3 capabilities: %+v", m)
+			}
+		}
+		if found != (provider == "workbuddy") {
+			t.Fatalf("GLM-5.3 registration for %s = %v", provider, found)
+		}
+	}
+}
+
+func TestGLM53UpstreamThinking(t *testing.T) {
+	for _, control := range []string{``, `,"reasoning_effort":"low"`, `,"reasoning_effort":"high"`, `,"reasoning_effort":"max"`, `,"thinking":{"type":"disabled"}`} {
+		input := `{"model":"glm-5.3","messages":[{"role":"user","content":"hello"}]` + control + `}`
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(rewriteSystemForUpstream([]byte(input)), &body); err != nil {
+			t.Fatal(err)
+		}
+		if string(body["model"]) != `"glm-5.3"` {
+			t.Fatal("model changed")
+		}
+		if control == "" {
+			if string(body["reasoning_effort"]) != `"high"` {
+				t.Fatal("missing default high")
+			}
+		} else {
+			var original map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(input), &original); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"reasoning_effort", "thinking"} {
+				if string(body[key]) != string(original[key]) {
+					t.Fatalf("%s changed: %s", key, body[key])
+				}
+			}
+		}
+	}
+}

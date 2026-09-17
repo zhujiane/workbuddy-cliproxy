@@ -337,11 +337,12 @@ func wbRegistration() registration {
 
 func wbModels() []pluginapi.ModelInfo {
 	const maxCompletionTokens int64 = 8192
-	specs := []struct {
+	type modelSpec struct {
 		id            string
 		name          string
 		contextLength int64
-	}{
+	}
+	specs := []modelSpec{
 		{"glm-5.2", "GLM-5.2", 1000000},
 		{"glm-5.1", "GLM-5.1", 131072},
 		{"glm-5v-turbo", "GLM-5V Turbo", 131072},
@@ -357,14 +358,18 @@ func wbModels() []pluginapi.ModelInfo {
 		{"deepseek-v4-flash", "DeepSeek V4 Flash", 1000000},
 		{"deepseek-v4.1-flash", "DeepSeek V4.1 Flash", 1000000},
 	}
+	if providerName == "workbuddy" {
+		// Advertise the default 300k context; GLM-5.3 also supports 1M.
+		specs = append(specs, modelSpec{"glm-5.3", "GLM-5.3", 300000})
+	}
 	models := make([]pluginapi.ModelInfo, 0, len(specs))
 	for _, m := range specs {
 		var thinking *pluginapi.ThinkingSupport
 		var parameters []string
-		if strings.HasPrefix(m.id, "hy3") || strings.HasPrefix(m.id, "deepseek-") {
+		if strings.HasPrefix(m.id, "hy3") || strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" {
 			thinking = &pluginapi.ThinkingSupport{Levels: []string{"high"}}
 			parameters = []string{"reasoning_effort"}
-			if strings.HasPrefix(m.id, "deepseek-") {
+			if strings.HasPrefix(m.id, "deepseek-") || m.id == "glm-5.3" {
 				thinking.Levels = []string{"low", "high", "max"}
 			}
 		}
@@ -1107,11 +1112,11 @@ func sanitizeBlockedTemplates(s string) string {
 	return s
 }
 
-// forceMaxThinking defaults DeepSeek to high without overriding explicit
+// forceMaxThinking defaults DeepSeek and GLM-5.3 to high without overriding explicit
 // controls, and preserves the historical forced-high behavior for hy3.
 func forceMaxThinking(obj map[string]any) bool {
 	model, _ := obj["model"].(string)
-	if strings.HasPrefix(model, "deepseek-") {
+	if strings.HasPrefix(model, "deepseek-") || model == "glm-5.3" {
 		if _, present := obj["reasoning_effort"]; present {
 			return false
 		}

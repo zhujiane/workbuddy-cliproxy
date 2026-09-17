@@ -57,6 +57,8 @@ llm-pi-ai:
 
 `glm-5.2` · `glm-5.1` · `glm-5v-turbo` · `kimi-k2.7` · `minimax-m3-pay` · `hy3` · `hy3-preview` · `hy3-preview-agent` · `hy4-preview` · `gpt-6-astra` · `deepseek-v4-pro` · `deepseek-v4-flash` · `deepseek-v4.1-flash`
 
+国际版 `workbuddy` 另支持 `glm-5.3`（GLM-5.3），思考强度为 `low` / `high` / `max`，未指定时默认 `high`；显式 `reasoning_effort` 或 `thinking` 设置保持不变。默认上下文为 300,000 token，支持扩展到 1,000,000 token；模型元数据声明默认值 300,000，输出上限沿用 8192 token。
+
 具体可用性以 CodeBuddy 账号权限为准。
 
 Hy4 Preview 和 GPT-6-Astra 的请求模型 ID 分别为 `hy4-preview` 和 `gpt-6-astra`，国内、国际插件均注册。上下文上限暂不声明，输出上限沿用插件的 8192 token 配置。
